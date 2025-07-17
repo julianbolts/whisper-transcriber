@@ -1,5 +1,8 @@
 # whisper-transcriber
 
+util script to transcribe an audio or video file using python and openai whisper
+
+## usage
 
 Don't forget to enable the venv with (because the vscode extension forgot this time):
 

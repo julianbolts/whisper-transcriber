@@ -1,3 +1,6 @@
+# whisper-transcriber
+
+
 Don't forget to enable the venv with (because the vscode extension forgot this time):
 
 `source  ./.venv/bin/activate`

@@ -12,14 +12,15 @@ import whisper
 import os
 import sys
 
-def transcribe_audio(input_file, output_file, model_size="base"):
+def transcribe_audio(input_file, output_file, model_size="base", snippet_size=5):
     """
-    Transcribe audio/video file using OpenAI Whisper with 1-second timestamps
+    Transcribe audio/video file using OpenAI Whisper with configurable snippet timestamps
     
     Args:
         input_file (str): Path to input audio/video file (.m4a or .mp4)
         output_file (str): Path to output transcript text file
         model_size (str): Whisper model size (tiny, base, small, medium, large)
+        snippet_size (int): Size of each snippet in seconds (default: 5)
     """
     
     # Validate input file exists
@@ -38,8 +39,8 @@ def transcribe_audio(input_file, output_file, model_size="base"):
     print(f"Transcribing with word-level timestamps: {input_file}")
     result = model.transcribe(input_file, word_timestamps=True)
     
-    # Group words by second intervals
-    timestamped_transcript = create_second_intervals(result)
+    # Group words by snippet intervals
+    timestamped_transcript = create_snippet_intervals(result, snippet_size)
     
     # Write to output file
     with open(output_file, 'w', encoding='utf-8') as f:
@@ -48,15 +49,16 @@ def transcribe_audio(input_file, output_file, model_size="base"):
     print(f"Timestamped transcript saved to: {output_file}")
     return timestamped_transcript
 
-def create_second_intervals(result):
+def create_snippet_intervals(result, snippet_size):
     """
-    Create transcript with 1-second intervals from Whisper word timestamps
+    Create transcript with configurable snippet intervals from Whisper word timestamps
     
     Args:
         result: Whisper transcription result with word timestamps
+        snippet_size (int): Size of each snippet in seconds
         
     Returns:
-        str: Formatted transcript with [M:SS] timestamps
+        str: Formatted transcript with [MM:SS - MM:SS] timestamps
     """
     lines = []
     
@@ -70,40 +72,47 @@ def create_second_intervals(result):
         # Fallback to segment-level timestamps if word-level not available
         for segment in result["segments"]:
             start_time = int(segment["start"])
-            minutes = start_time // 60
-            seconds = start_time % 60
-            timestamp = f"[{minutes}:{seconds:02d}]"
+            end_time = int(segment["end"])
+            start_minutes = start_time // 60
+            start_seconds = start_time % 60
+            end_minutes = end_time // 60
+            end_seconds = end_time % 60
+            timestamp = f"[{start_minutes}:{start_seconds:02d} - {end_minutes}:{end_seconds:02d}]"
             lines.append(f"{timestamp} {segment['text'].strip()}")
         return "\n".join(lines)
     
-    # Group words by second
-    current_second = 0
+    # Group words by snippet intervals
+    current_snippet_start = 0
     current_words = []
     
     for word in all_words:
         word_second = int(word["start"])
         
-        # If we've moved to a new second, output the previous second
-        while current_second < word_second:
+        # If we've moved to a new snippet interval, output the previous snippet
+        while current_snippet_start + snippet_size <= word_second:
             if current_words:
-                minutes = current_second // 60
-                seconds = current_second % 60
-                timestamp = f"[{minutes}:{seconds:02d}]"
+                start_minutes = current_snippet_start // 60
+                start_seconds = current_snippet_start % 60
+                end_minutes = (current_snippet_start + snippet_size - 1) // 60
+                end_seconds = (current_snippet_start + snippet_size - 1) % 60
+                timestamp = f"[{start_minutes}:{start_seconds:02d} - {end_minutes}:{end_seconds:02d}]"
                 text = " ".join(current_words).strip()
                 if text:  # Only add non-empty lines
                     lines.append(f"{timestamp} {text}")
                 current_words = []
-            current_second += 1
+            current_snippet_start += snippet_size
         
-        # Add word to current second
-        if word_second == current_second:
+        # Add word to current snippet if it falls within the current interval
+        if current_snippet_start <= word_second < current_snippet_start + snippet_size:
             current_words.append(word["word"].strip())
     
     # Handle any remaining words
     if current_words:
-        minutes = current_second // 60
-        seconds = current_second % 60
-        timestamp = f"[{minutes}:{seconds:02d}]"
+        start_minutes = current_snippet_start // 60
+        start_seconds = current_snippet_start % 60
+        end_minutes = (current_snippet_start + snippet_size - 1) // 60
+        end_seconds = (current_snippet_start + snippet_size - 1) % 60
+        timestamp = f"[{start_minutes}:{start_seconds:02d} - {end_minutes}:{end_seconds:02d}]"
         text = " ".join(current_words).strip()
         if text:
             lines.append(f"{timestamp} {text}")
@@ -117,11 +126,13 @@ def main():
     parser.add_argument("--model", default="base", 
                        choices=["tiny", "base", "small", "medium", "large"],
                        help="Whisper model size (default: base)")
+    parser.add_argument("--snippet-size", type=int, default=5,
+                       help="Size of each snippet in seconds (default: 5)")
     
     args = parser.parse_args()
     
     try:
-        transcribe_audio(args.input_file, args.output_file, args.model)
+        transcribe_audio(args.input_file, args.output_file, args.model, args.snippet_size)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
